@@ -1,0 +1,100 @@
+name: Deploy via SSH
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Generate Prisma client
+      run: npm run db:generate
+    
+    - name: Build application
+      run: npm run build
+    
+    - name: Create deployment package
+      run: |
+        tar -czf deployment.tar.gz \
+          dist/ \
+          node_modules/.prisma/ \
+          prisma/ \
+          package.json \
+          package-lock.json \
+          docker-compose.yml \
+          .env.example
+    
+    - name: Deploy to server via SSH
+      uses: appleboy/ssh-action@v0.1.5
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        port: ${{ secrets.SERVER_PORT }}
+        script: |
+          # Создаем директорию для проекта
+          mkdir -p /opt/solana-liquidity-ts
+          cd /opt/solana-liquidity-ts
+          
+          # Останавливаем текущий сервис
+          sudo systemctl stop solana-liquidity || true
+          
+          # Создаем backup
+          if [ -d "current" ]; then
+            cp -r current backup-$(date +%Y%m%d_%H%M%S)
+          fi
+    
+    - name: Upload files
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        port: ${{ secrets.SERVER_PORT }}
+        source: "deployment.tar.gz"
+        target: "/opt/solana-liquidity-ts/"
+    
+    - name: Extract and deploy
+      uses: appleboy/ssh-action@v0.1.5
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        port: ${{ secrets.SERVER_PORT }}
+        script: |
+          cd /opt/solana-liquidity-ts
+          
+          # Распаковываем новый код
+          tar -xzf deployment.tar.gz
+          
+          # Устанавливаем зависимости
+          npm ci --only=production
+          
+          # Применяем миграции
+          npm run db:migrate
+          
+          # Запускаем сервис
+          sudo systemctl start solana-liquidity
+          
+          # Проверяем статус
+          sudo systemctl status solana-liquidity
+          
+          # Проверяем здоровье API
+          sleep 10
+          curl -f http://localhost:3000/api/v1/pools/health || exit 1
+          
+          echo "✅ Deployment completed successfully!"

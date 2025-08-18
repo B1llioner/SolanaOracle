@@ -1,0 +1,63 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Pool {
+  id          String   @id @default(cuid())
+  address     String   @unique
+  protocol    Protocol
+  poolType    PoolType
+  tokenA      String
+  tokenB      String
+  tokenAMint  String
+  tokenBMint  String
+  fee         Float
+  feeRate     Float
+  liquidity   Float
+  volume24h   Float?
+  tvl         Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  quotes Quote[]
+
+  @@map("pools")
+}
+
+model Quote {
+  id        String   @id @default(cuid())
+  poolId    String
+  pool      Pool     @relation(fields: [poolId], references: [id])
+  inputToken String
+  outputToken String
+  inputAmount Float
+  outputAmount Float
+  price     Float
+  priceImpact Float?
+  fee       Float
+  createdAt DateTime @default(now())
+
+  @@map("quotes")
+}
+
+enum Protocol {
+  RAYDIUM_AMM
+  RAYDIUM_CLMM
+  ORCA_WHIRLPOOL
+  METEORA_DLMM
+}
+
+enum PoolType {
+  CONSTANT_PRODUCT
+  CONSTANT_SUM
+  WEIGHTED
+  CONCENTRATED
+}
